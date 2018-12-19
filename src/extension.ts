@@ -137,6 +137,8 @@ class TransformedDocument {
         await this.doc.restoreBackupIfExists();
     }
 
+    private vars: any = {};
+
     public async update(transformSrc: string) {    
         await this.restore();
         this.doc.backup();
@@ -145,29 +147,39 @@ class TransformedDocument {
         const myVm = new vm.VM({
             timeout: 1000,
             sandbox: {
+                vars: this.vars,
                 find: (regexp: RegExp) => {
                     const str = this.doc.editor.document.getText();
-                    //const regexp = new RegExp(transformSrc, "gi");
                     
-                    let result = new Array<{ range: vscode.Range, text: string }>();
+                    let result = new Array<{ range: vscode.Range, text: string, groups: string[] }>();
                     let match: RegExpExecArray|null;
                     let i = 0;
+                    
                     while (match = regexp.exec(str)) {
                         if (i++ > 1000) { break; }
                         const p1 = this.doc.editor.document.positionAt(match.index);
                         const p2 = this.doc.editor.document.positionAt(match.index + match[0].length);
                         
-                        result.push({ range: new vscode.Range(p1, p2), text: match[0] });
+                        result.push({ range: new vscode.Range(p1, p2), text: match[0], groups: match!.slice(0) });
                     }
 
-                    
                     this.doc.editor.setDecorations(deco, result);
 
                     return ({
+                        items: result,
                         replace: async (mapResult: (str: String, idx: number) => string) => {
                             await this.doc.applyEdits(new Edits(result.map((r, idx) => new Edit(r.range, mapResult(r.text, idx)))));
                         }
-                    })
+                    });
+                },
+                selections: () => {
+                    const result = this.doc.editor.selections.map(r => ({ text: this.doc.editor.document.getText(r), range: r }));
+                    return ({
+                        result,
+                        replace: async (mapResult: (str: String, idx: number) => string) => {
+                            await this.doc.applyEdits(new Edits(result.map((r, idx) => new Edit(r.range, mapResult(r.text, idx)))));
+                        }
+                    });
                 }
             }
         });
